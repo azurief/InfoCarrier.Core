@@ -7,6 +7,7 @@ namespace InfoCarrier.Core.Client.Storage.Internal
     using System.Diagnostics.CodeAnalysis;
     using Microsoft.EntityFrameworkCore.ChangeTracking;
     using Microsoft.EntityFrameworkCore.Storage;
+    using Microsoft.EntityFrameworkCore.Storage.Json;
     using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
     /// <summary>
@@ -45,9 +46,15 @@ namespace InfoCarrier.Core.Client.Storage.Internal
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
-        [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:ElementParametersMustBeDocumented", Justification = "Entity Framework Core internal.")]
-        [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1615:ElementReturnValueMustBeDocumented", Justification = "Entity Framework Core internal.")]
-        public override CoreTypeMapping Clone(ValueConverter converter)
-            => new InfoCarrierTypeMapping(this.Parameters.WithComposedConverter(converter));
+        //[SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:ElementParametersMustBeDocumented", Justification = "Entity Framework Core internal.")]
+        //[SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1615:ElementReturnValueMustBeDocumented", Justification = "Entity Framework Core internal.")]
+        //public override CoreTypeMapping Clone(ValueConverter? converter = null)
+        //    => new InfoCarrierTypeMapping(this.Parameters.WithComposedConverter(converter));
+
+        public override CoreTypeMapping WithComposedConverter(ValueConverter? converter, ValueComparer? comparer = null, ValueComparer? keyComparer = null, CoreTypeMapping? elementMapping = null, JsonValueReaderWriter? jsonValueReaderWriter = null)
+            => new InfoCarrierTypeMapping(this.Parameters.WithComposedConverter(converter, comparer, keyComparer, elementMapping, jsonValueReaderWriter));
+
+        protected override CoreTypeMapping Clone(CoreTypeMappingParameters parameters)
+            => new InfoCarrierTypeMapping(parameters);
     }
 }

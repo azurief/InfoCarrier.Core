@@ -35,7 +35,7 @@ namespace InfoCarrier.Core.Client.ValueGeneration
         /// </summary>
         [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:ElementParametersMustBeDocumented", Justification = "Entity Framework Core internal.")]
         [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1615:ElementReturnValueMustBeDocumented", Justification = "Entity Framework Core internal.")]
-        public override ValueGenerator Create(IProperty property, IEntityType entityType)
+        public ValueGenerator Create(IProperty property, IEntityType entityType)
         {
             if (property.ValueGenerated != ValueGenerated.Never)
             {
@@ -54,7 +54,8 @@ namespace InfoCarrier.Core.Client.ValueGeneration
                     || propertyType == typeof(float)
                     || propertyType == typeof(double))
                 {
-                    return this.numberFactory.Create(property);
+                    //return this.numberFactory.Create(property);
+                    return this.numberFactory.Create(property, entityType);
                 }
             }
 

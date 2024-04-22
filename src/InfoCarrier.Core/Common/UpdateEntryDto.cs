@@ -54,7 +54,7 @@ namespace InfoCarrier.Core.Common
                     IsTemporary = prop.IsTemporary,
                 }).ToList();
 
-            if (entry.EntityType.HasDefiningNavigation())
+            if (entry.EntityType.FindOwnership() != null)
             {
                 var ownership = entry.EntityType.GetForeignKeys().Single(fk => fk.IsOwnership);
                 this.DelegatedIdentityDatas = ownership.Properties.Select(

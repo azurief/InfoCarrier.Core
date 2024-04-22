@@ -101,11 +101,16 @@ namespace InfoCarrier.Core.Client.Infrastructure.Internal
                 }
             }
 
-            public override long GetServiceProviderHashCode() => this.Extension.InfoCarrierClient.ServerUrl?.GetHashCode() ?? 0L;
+            public override int GetServiceProviderHashCode() => this.Extension.InfoCarrierClient.ServerUrl?.GetHashCode() ?? 0;
 
             public override void PopulateDebugInfo(IDictionary<string, string> debugInfo)
                 => debugInfo["InfoCarrierDatabase:ServerUrl"]
                     = (this.Extension.InfoCarrierClient.ServerUrl?.GetHashCode() ?? 0L).ToString(CultureInfo.InvariantCulture);
+
+            public override bool ShouldUseSameServiceProvider(DbContextOptionsExtensionInfo other)
+            {
+                throw new NotImplementedException();
+            }
         }
     }
 }

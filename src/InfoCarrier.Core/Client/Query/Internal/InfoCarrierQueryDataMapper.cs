@@ -24,9 +24,9 @@ namespace InfoCarrier.Core.Client.Query.Internal
     ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
     ///     directly from your code. This API may change or be removed in future releases.
     /// </summary>
-    public class InfoCarrierQueryResultMapper : DynamicObjectMapper
+    public class InfoCarrierQueryDataMapper : DynamicObjectMapper
     {
-        private readonly QueryContext queryContext;
+        private readonly DbContext dbContext;
         private readonly ITypeResolver typeResolver;
         private readonly IReadOnlyDictionary<string, IEntityType> entityTypeMap;
         private readonly IEntityMaterializerSource entityMaterializerSource;
@@ -40,18 +40,18 @@ namespace InfoCarrier.Core.Client.Query.Internal
         /// </summary>
         [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1611:ElementParametersMustBeDocumented", Justification = "InfoCarrier.Core internal.")]
         [SuppressMessage("StyleCop.CSharp.DocumentationRules", "SA1642:ConstructorSummaryDocumentationMustBeginWithStandardText", Justification = "InfoCarrier.Core internal.")]
-        public InfoCarrierQueryResultMapper(
-            QueryContext queryContext,
+        public InfoCarrierQueryDataMapper(
+            DbContext dbContext,
             ITypeResolver typeResolver,
             ITypeInfoProvider typeInfoProvider,
             IReadOnlyDictionary<string, IEntityType> entityTypeMap = null)
             : base(typeResolver, typeInfoProvider, new DynamicObjectMapperSettings { FormatNativeTypesAsString = true })
         {
-            this.queryContext = queryContext;
+            this.dbContext = dbContext;
             this.typeResolver = typeResolver;
-            this.entityTypeMap = entityTypeMap ?? BuildEntityTypeMap(queryContext.Context);
-            this.entityMaterializerSource = queryContext.Context.GetService<IEntityMaterializerSource>();
-            this.valueMappers = queryContext.Context.GetService<IEnumerable<IInfoCarrierValueMapper>>()
+            this.entityTypeMap = entityTypeMap ?? BuildEntityTypeMap(dbContext);
+            this.entityMaterializerSource = dbContext.GetService<IEntityMaterializerSource>();
+            this.valueMappers = dbContext.GetService<IEnumerable<IInfoCarrierValueMapper>>()
                 .Concat(StandardValueMappers.Mappers);
         }
 
@@ -151,19 +151,17 @@ namespace InfoCarrier.Core.Client.Query.Internal
 
             bool entityIsTracked = loadedNavigations != null;
 
-            IServiceProvider serviceProvider = queryContext.Context.GetInfrastructure();
-            var stateManager = serviceProvider.GetRequiredService<IStateManager>();
-
             // Get entity instance from EFC's identity map, or create a new one
             InternalEntityEntry entry = null;
             IKey pk = entityType.FindPrimaryKey();
             if (pk != null && entityIsTracked)
             {
-                var keyValues = pk.Properties.Select(p => values[p.Name]).ToArray();
-                bool hasNullkey;
-                entry = stateManager
-                    .TryGetEntry(pk, keyValues, false, out hasNullkey);
+                entry = dbContext.GetService<IStateManager>()
+                    .TryGetEntry(pk, pk.Properties.Select(p => values[p.Name]).ToArray(), false, out bool hasNullkey);
             }
+
+            IServiceProvider serviceProvider = dbContext.GetInfrastructure();
+            var stateManager = serviceProvider.GetRequiredService<IStateManager>();
 
             if (entry == null)
             {
@@ -246,9 +244,9 @@ namespace InfoCarrier.Core.Client.Query.Internal
 
         private class MapFromDynamicObjectContext : IMapFromDynamicObjectContext
         {
-            private readonly InfoCarrierQueryResultMapper mapper;
+            private readonly InfoCarrierQueryDataMapper mapper;
 
-            public MapFromDynamicObjectContext(DynamicObject dto, InfoCarrierQueryResultMapper mapper)
+            public MapFromDynamicObjectContext(DynamicObject dto, InfoCarrierQueryDataMapper mapper)
             {
                 this.mapper = mapper;
                 this.Dto = dto;

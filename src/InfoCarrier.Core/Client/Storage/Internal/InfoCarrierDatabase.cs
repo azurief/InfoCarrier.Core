@@ -13,6 +13,7 @@ namespace InfoCarrier.Core.Client.Storage.Internal
     using System.Threading;
     using System.Threading.Tasks;
     using Aqua.TypeSystem;
+    using InfoCarrier.Core.Client.Extensions;
     using InfoCarrier.Core.Client.Infrastructure.Internal;
     using InfoCarrier.Core.Client.Query.Internal;
     using InfoCarrier.Core.Common;
@@ -25,6 +26,7 @@ namespace InfoCarrier.Core.Client.Storage.Internal
     using Microsoft.EntityFrameworkCore.Storage;
     using Microsoft.EntityFrameworkCore.Update;
     using Remote.Linq;
+    using Remote.Linq.DynamicQuery;
     using Remote.Linq.ExpressionVisitors;
 
     /// <summary>
@@ -130,6 +132,8 @@ namespace InfoCarrier.Core.Client.Storage.Internal
             private readonly InfoCarrierQueryResultMapper resultMapper;
             private QueryDataRequest queryDataRequest;
 
+            private bool NeedMapping(object o) => false;
+
             public QueryExecutor(QueryContext queryContext, Expression query, IInfoCarrierClient infoCarrierClient)
             {
                 this.queryContext = queryContext;
@@ -140,12 +144,25 @@ namespace InfoCarrier.Core.Client.Storage.Internal
                 ITypeInfoProvider typeInfoProvider = new TypeInfoProvider();
                 this.resultMapper = new InfoCarrierQueryResultMapper(queryContext, typeResolver, typeInfoProvider, entityTypeMap);
 
+
+                InfoCarrierToRemoteContext carrierCtx = new InfoCarrierToRemoteContext();
+                carrierCtx.TypeInfoProvider = typeInfoProvider;
+                carrierCtx.ValueMapper = this.resultMapper;
+                carrierCtx.CanBeEvaluatedLocally = InfoCarrierEvaluatableExpressionFilter.CanBeEvaluated;
+                carrierCtx.NeedsMapping = this.NeedMapping;
+
+                IExpressionTranslator expressionTranslator = new ExpressionTranslator(carrierCtx);
+                carrierCtx.ExpressionTranslator = expressionTranslator;
+
+
                 // Substitute query parameters
                 query = new SubstituteParametersExpressionVisitor(queryContext).Visit(query);
 
                 // UGLY: this resembles Remote.Linq.DynamicQuery.RemoteQueryProvider<>.TranslateExpression()
+                //.ToRemoteLinqExpression(typeInfoProvider, InfoCarrierEvaluatableExpressionFilter.CanBeEvaluated)
+
                 var rlinq = query
-                    .ToRemoteLinqExpression(typeInfoProvider, InfoCarrierEvaluatableExpressionFilter.CanBeEvaluated)
+                    .ToRemoteLinqExpression(carrierCtx)
                     .ReplaceQueryableByResourceDescriptors(typeInfoProvider)
                     .ReplaceGenericQueryArgumentsByNonGenericArguments();
 
@@ -194,6 +211,8 @@ namespace InfoCarrier.Core.Client.Storage.Internal
         {
             private readonly QueryContext queryContext;
 
+            private const string CompiledQueryParameterPrefix = "__";
+
             public SubstituteParametersExpressionVisitor(QueryContext queryContext)
             {
                 this.queryContext = queryContext;
@@ -201,7 +220,7 @@ namespace InfoCarrier.Core.Client.Storage.Internal
 
             protected override Expression VisitParameter(ParameterExpression node)
             {
-                if (node.Name?.StartsWith(CompiledQueryCache.CompiledQueryParameterPrefix, StringComparison.Ordinal) == true)
+                if (node.Name?.StartsWith(CompiledQueryParameterPrefix, StringComparison.Ordinal) == true)
                 {
                     object paramValue = Activator.CreateInstance(
                         typeof(ValueWrapper<>).MakeGenericType(node.Type),
@@ -223,12 +242,35 @@ namespace InfoCarrier.Core.Client.Storage.Internal
             }
         }
 
-        private class EntityQueryableStubVisitor : ExpressionVisitorBase
+        private class EntityQueryableStubVisitor : SystemExpressionVisitorBase
         {
             internal static Expression Replace(Expression expression)
                 => new EntityQueryableStubVisitor().Visit(expression);
 
-            protected override Expression VisitConstant(ConstantExpression constantExpression)
+            protected override Expression Visit(Expression expression)
+            {
+                if(expression != null)
+                {
+                    if (expression.NodeType == ExpressionType.Extension)
+                    {
+                        return VisitExtension((QueryRootExpression)expression);
+                    }
+                    else
+                    {
+                        return base.Visit(expression);
+                    }
+                }
+
+                return null;
+            }
+
+            protected Expression VisitExtension(QueryRootExpression extensionExpression)
+            {
+                object stub = Activator.CreateInstance(typeof(RemoteQueryableStub<>).MakeGenericType(extensionExpression.ElementType));
+                return Expression.Constant(stub);
+            }
+
+            protected override Expression VisitConstant(ConstantExpression  constantExpression)
                 => constantExpression.IsEntityQueryable()
                     ? this.VisitEntityQueryable(((IQueryable)constantExpression.Value).ElementType)
                     : constantExpression;
@@ -254,6 +296,8 @@ namespace InfoCarrier.Core.Client.Storage.Internal
                     [ExcludeFromCodeCoverage]
                     get => throw new NotImplementedException();
                 }
+
+                public Type ResourceType => typeof(T);
 
                 IRemoteQueryProvider IRemoteQueryable.Provider
                 {

@@ -53,15 +53,15 @@ namespace InfoCarrier.Core.Server
                 }
 
                 EntityEntry entry;
-                if (entityType.HasDefiningNavigation())
+                if (entityType.FindOwnership() != null)
                 {
-                    IKey key = entityType.DefiningEntityType.FindPrimaryKey();
+                    IKey key = entityType.FindOwnership()?.PrincipalKey;
                     object[] keyValues = dto.GetDelegatedIdentityKeys(request.Mapper, key);
 
                     // Here we assume that the owner entry is already present in the context
                     EntityEntry ownerEntry = stateManager.TryGetEntry(key, keyValues).ToEntityEntry();
 
-                    ReferenceEntry referenceEntry = ownerEntry.Reference(entityType.DefiningNavigationName);
+                    ReferenceEntry referenceEntry = ownerEntry.Reference(entityType.FindOwnership()?.PrincipalToDependent.Name);
                     if (referenceEntry.CurrentValue == null)
                     {
                         referenceEntry.CurrentValue = MaterializeEntity();
@@ -96,7 +96,7 @@ namespace InfoCarrier.Core.Server
                 {
                     bool canSetCurrentValue =
                         p.EfProperty.Metadata.IsShadowProperty() ||
-                        p.EfProperty.Metadata.TryGetMemberInfo(forConstruction: false, forSet: true, out _, out _);
+                        p.EfProperty.Metadata.TryGetMemberInfo(forMaterialization: false, forSet: true, out _, out _);
 
                     if (canSetCurrentValue)
                     {

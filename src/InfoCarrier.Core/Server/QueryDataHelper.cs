@@ -11,16 +11,21 @@ namespace InfoCarrier.Core.Server
     using System.Threading;
     using System.Threading.Tasks;
     using Aqua.Dynamic;
+    using Aqua.TypeExtensions;
     using Aqua.TypeSystem;
+    using InfoCarrier.Core.Client.Query.Internal;
+    using InfoCarrier.Core.Client.Storage.Internal;
     using InfoCarrier.Core.Common;
     using InfoCarrier.Core.Common.ValueMapping;
     using Microsoft.EntityFrameworkCore;
     using Microsoft.EntityFrameworkCore.ChangeTracking.Internal;
     using Microsoft.EntityFrameworkCore.Infrastructure;
     using Microsoft.EntityFrameworkCore.Metadata;
+    using Microsoft.EntityFrameworkCore.Query;
     using Microsoft.EntityFrameworkCore.Query.Internal;
     using Microsoft.Extensions.DependencyInjection;
     using Remote.Linq;
+    using Remote.Linq.ExpressionExecution;
     using Remote.Linq.ExpressionVisitors;
     using MethodInfo = System.Reflection.MethodInfo;
 
@@ -39,8 +44,11 @@ namespace InfoCarrier.Core.Server
         private readonly DbContext dbContext;
         private readonly IEnumerable<IInfoCarrierValueMapper> valueMappers;
         private readonly System.Linq.Expressions.Expression linqExpression;
+        private Remote.Linq.Expressions.Expression remoteExpression;
         private readonly ITypeResolver typeResolver = TypeResolver.Instance;
         private readonly ITypeInfoProvider typeInfoProvider = new TypeInfoProvider();
+
+        private DefaultExpressionExecutor executor;
 
         /// <summary>
         ///     Initializes a new instance of the <see cref="QueryDataHelper" /> class.
@@ -56,18 +64,44 @@ namespace InfoCarrier.Core.Server
             this.dbContext = dbContext;
             this.valueMappers = customValueMappers.Concat(StandardValueMappers.Mappers);
 
+            IReadOnlyDictionary<string, IEntityType> entityTypeMap = this.dbContext.Model.GetEntityTypes().ToDictionary(x => x.DisplayName());
+            var valueMapper = new InfoCarrierQueryDataMapper(dbContext, typeResolver, typeInfoProvider, entityTypeMap);
+
+
             this.dbContext.ChangeTracker.QueryTrackingBehavior = request.TrackingBehavior;
-            IAsyncQueryProvider provider = this.dbContext.GetService<IAsyncQueryProvider>();
+            IAsyncQueryProvider queryProvider = this.dbContext.GetService<IAsyncQueryProvider>();
+
+            InfoCarrierFromRemoteContext context = new InfoCarrierFromRemoteContext();
+            context.ValueMapper = valueMapper;
+            context.TypeResolver = this.typeResolver;
+
+            this.executor = new DefaultExpressionExecutor((type => (IQueryable)Activator.CreateInstance(
+                                                            typeof(EntityQueryable<>).MakeGenericType(type),
+                                                            queryProvider,
+                                                            this.dbContext.Model.FindEntityType(type))),
+                                                          context, null);
 
             // UGLY: this resembles Remote.Linq.Expressions.ExpressionExtensions.PrepareForExecution()
             // but excludes PartialEval (otherwise simple queries like db.Set<X>().First() are executed
             // prematurely)
-            this.linqExpression = request.Query
-                .ReplaceNonGenericQueryArgumentsByGenericArguments()
-                .ReplaceResourceDescriptorsByQueryable(
-                    this.typeResolver,
-                    provider: type => (IQueryable)Activator.CreateInstance(typeof(EntityQueryable<>).MakeGenericType(type), provider))
-                .ToLinqExpression(this.typeResolver);
+            this.remoteExpression = request.Query;
+            var queryWithArgs = request.Query
+                .ReplaceNonGenericQueryArgumentsByGenericArguments();
+            var queryWithQueryable = queryWithArgs.ReplaceResourceDescriptorsByQueryable(
+                    typeResolver: this.typeResolver,
+                    provider: type => (IQueryable)Activator.CreateInstance(
+                                                        typeof(EntityQueryable<>).MakeGenericType(type),
+                                                        queryProvider,
+                                                        this.dbContext.Model.FindEntityType(type)));
+            this.linqExpression = queryWithQueryable.ToLinqExpression(context);
+
+            //this.linqExpression.PartialEval(context?.CanBeEvaluatedLocally);
+            //this.linqExpression = request.Query
+            //    .ReplaceNonGenericQueryArgumentsByGenericArguments();
+            //    .ReplaceResourceDescriptorsByQueryable(
+            //        typeResolver: this.typeResolver,
+            //        provider: type => (IQueryable)Activator.CreateInstance(typeof(EntityQueryable<>).MakeGenericType(type), queryProvider))
+            //    .ToLinqExpression(context);
         }
 
         /// <summary>
@@ -83,10 +117,13 @@ namespace InfoCarrier.Core.Server
                 ? this.linqExpression.Type
                 : typeof(IEnumerable<>).MakeGenericType(this.linqExpression.Type.GenericTypeArguments.First());
 
-            object queryResult = ExecuteExpressionMethod
-                .MakeGenericMethod(resultType)
-                .ToDelegate<Func<object>>(this)
-                .Invoke();
+            //object queryResult = ExecuteExpressionMethod
+            //    .MakeGenericMethod(resultType)
+            //    .ToDelegate<Func<object>>(this)
+            //    .Invoke();
+
+            object queryResult = executor.Execute(this.remoteExpression);
+
 
             if (queryReturnsSingleResult)
             {
